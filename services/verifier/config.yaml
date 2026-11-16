@@ -1,0 +1,80 @@
+# CrowdCampaign verifier service (Assignment 2).
+# The verifier checks claims against the web pages they cite. This file is only about HOW it works.
+# The budget for each request is sent by the orchestrator; the limits below are ceilings: the most this
+# service will spend on one request, whatever the caller asks for. The code enforces every limit;
+# nothing the model reads or writes can change them.
+
+# The model that judges. "auto" uses the first provider below whose API key is set in
+# services/verifier/.env (or, when deployed, in the host's environment settings).
+# A different model from the researcher's gives a more independent second opinion.
+model:
+  provider: auto
+  providers:
+    gemini:
+      name: gemini-3.5-flash-lite
+      reasoning_effort: low
+    groq:
+      name: openai/gpt-oss-120b
+      reasoning_effort: low
+      max_output_tokens: 1024   # Groq's free tier allows 8,000 tokens per minute, so keep replies short
+  max_output_tokens: 1024       # the answer is one small JSON object
+  request_timeout_seconds: 60
+
+# How the verifier's code checks the model's answer. A "supported" verdict survives only if ALL of these hold.
+verification:
+  max_excerpt_chars: 300        # the contract's limit for evidence (cannot be raised above 300)
+  min_word_overlap: 0.3         # the excerpt must contain at least this share of the claim's content words
+  numbers_in_excerpt: true      # every number in the claim (years excepted) must be in the excerpt
+  reasks: 1                     # extra model calls allowed when a reply is not usable JSON
+
+# Ceilings for ONE request. The request's own budget (sent by the orchestrator) is used when it is
+# smaller. When any budget runs out the verifier stops and answers "partial" with the verdicts it has.
+limits:
+  max_steps: 100       # one step per claim checked
+  max_fetches: 200     # every outbound page request: the page, each redirect, and each robots.txt
+  max_tokens: 300000   # prompt + reply tokens across all model calls
+  max_seconds: 600     # wall-clock time from the moment the request arrives
+
+# Retries for transient failures (timeouts, per-minute rate limits, server errors).
+# Terminal failures (bad key, daily quota, payment required) are never retried.
+retries:
+  max_retries: 3
+  base_delay_seconds: 2      # waits 2 s, 4 s, 8 s (plus a little randomness)
+  max_wait_seconds: 65       # a provider asking us to wait longer than this ends the work
+
+# The fetch guardrail. These checks run before any request is made, for the claim's URL and again for
+# every redirect: only http(s); no username/password; only ports 80 and 443; no localhost/.local/.internal
+# names; the host name is RESOLVED and refused if any address is loopback, private, link-local
+# (169.254.169.254, the cloud metadata address, is link-local), multicast, reserved or unspecified, IPv4
+# or IPv6; and the address actually connected to is checked again.
+fetch:
+  allowed_schemes: [http, https]
+  allowed_ports: [80, 443]
+  allowed_hosts: ["*"]
+  blocked_hosts:
+    - facebook.com
+    - instagram.com
+    - x.com
+    - twitter.com
+    - tiktok.com
+    - linkedin.com
+    - reddit.com
+    - pinterest.com
+    - youtube.com
+    - threads.net
+    - wsj.com
+    - ft.com
+    - bloomberg.com
+  respect_robots_txt: true
+  timeout_seconds: 15
+  max_bytes: 2000000
+  max_redirects: 4
+  max_chars_to_model: 3500         # page text shown to the model, per claim (the most relevant sentences)
+  user_agent: "Mozilla/5.0 (compatible; CrowdCampaignTracker/1.0; NYU course project)"
+
+# The HTTP service itself.
+server:
+  port: 8002                       # $PORT (set by hosts like Render) or --port overrides this
+  max_concurrent: 2                # requests worked on at once; more get 503 + Retry-After
+  retry_after_cap_seconds: 30      # the longest Retry-After this service ever asks for
+  remembered_requests: 200         # answers kept in memory so a repeated request_id is not redone

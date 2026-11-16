@@ -1,0 +1,4 @@
+# Install with: pip install -r requirements.txt   (from services/researcher/)
+requests>=2.31,<3      # HTTP for the model and search APIs (also brings the certifi CA bundle)
+PyYAML>=6.0,<7         # reads config.yaml
+jsonschema>=4.18,<5    # checks every request and answer against the contract

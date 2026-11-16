@@ -1,0 +1,99 @@
+# CrowdCampaign researcher service (Assignment 2).
+# This is the Assignment 1B tracker's policy file, moved here. It is only about HOW the researcher
+# works. WHAT to research (topics, K) is sent by the orchestrator with every request, and the budget
+# for each request is sent too. The limits below are ceilings: the most this service will spend on one
+# request, whatever the caller asks for. The code enforces every limit; nothing the model reads or
+# writes can change them.
+
+# The model that makes the decisions. "auto" uses the first provider below whose API key
+# is set in services/researcher/.env (or in the host's environment). Any OpenAI-compatible
+# endpoint works: add base_url and key_env.
+model:
+  provider: auto
+  providers:
+    gemini:
+      name: gemini-3.5-flash-lite
+      reasoning_effort: low
+    groq:
+      name: openai/gpt-oss-120b
+      reasoning_effort: low
+      max_output_tokens: 1024   # Groq's free tier allows 8,000 tokens per minute, so keep replies short
+  max_output_tokens: 4096       # longest reply allowed (thinking included)
+  request_timeout_seconds: 60
+
+# Web search (Tavily). One basic search costs 1 credit.
+search:
+  provider: tavily
+  topic: news           # news results come with publish dates
+  time_range: month     # only results from the past month
+  max_results: 6
+  search_depth: basic
+
+# Extra guidance for the model, added to its fixed instructions.
+instructions: |
+  A development is a specific, recent event: a product launch, a marketing campaign or stunt,
+  a partnership, a pricing change, or a notable sales or survey result. Opinion pieces and
+  generic listicles are not developments.
+  Rank by how useful each development is to someone pitching or judging marketing ideas for
+  the topic: how new it is, how big it is, and how close it is to the topic's audience.
+  Prefer developments from the past 30 days. Use at most one development per article unless
+  the article clearly reports several separate events.
+  Write claims as plain statements of fact that the article makes, such as "Oatly launched a
+  barista-style oat cold brew in US grocery stores in September 2026." Do not write opinions.
+
+# The tools the model may call. Anything else it asks for is refused.
+tools:
+  - search_web
+  - fetch_article
+  - finish
+
+# Ceilings for ONE request. The request's own budget (sent by the orchestrator) is used when it is
+# smaller. When any budget runs out the agent stops and answers "partial" with what it already has.
+limits:
+  max_steps: 40        # model calls
+  max_searches: 3      # search_web calls (not part of the contract's budget; this service's own cap)
+  max_fetches: 40      # every outbound page request: the page, each redirect, and each robots.txt
+  max_tokens: 200000   # prompt + reply tokens across all model calls
+  max_seconds: 900     # wall-clock time from the moment the request arrives
+
+# Retries for transient failures (timeouts, per-minute rate limits, server errors).
+# Terminal failures (bad key, daily quota, payment required) are never retried.
+retries:
+  max_retries: 3
+  base_delay_seconds: 2      # waits 2 s, 4 s, 8 s (plus a little randomness)
+  max_wait_seconds: 65       # a provider asking us to wait longer than this ends the work
+
+# fetch_article's guardrail. These checks run before any request is made.
+# The code also resolves the host name and refuses any address that is not public, and checks every
+# redirect hop again (see guard.py).
+fetch:
+  allowed_schemes: [http, https]   # the code also refuses anything that isn't http(s)
+  allowed_ports: [80, 443]
+  allowed_hosts: ["*"]             # "*" = any public host not blocked below
+  blocked_hosts:                   # sites behind a login or whose terms forbid scraping
+    - facebook.com
+    - instagram.com
+    - x.com
+    - twitter.com
+    - tiktok.com
+    - linkedin.com
+    - reddit.com
+    - pinterest.com
+    - youtube.com
+    - threads.net
+    - wsj.com
+    - ft.com
+    - bloomberg.com
+  respect_robots_txt: true
+  timeout_seconds: 15              # for the whole download, redirects included
+  max_bytes: 2000000               # reading stops at 2 MB
+  max_redirects: 4
+  max_chars_to_model: 3500         # article text shown to the model, per article
+  user_agent: "Mozilla/5.0 (compatible; CrowdCampaignTracker/1.0; NYU course project)"
+
+# The HTTP service itself.
+server:
+  port: 8001                       # $PORT (set by hosts like Render) or --port overrides this
+  max_concurrent: 2                # requests worked on at once; more get 503 + Retry-After
+  retry_after_cap_seconds: 30      # the longest Retry-After this service ever asks for
+  remembered_requests: 200         # answers kept in memory so a repeated request_id is not redone

@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crowdcampaign.example/contract.schema.json",
+  "title": "CrowdCampaign worker contract (orchestrator <-> researcher, verifier)",
+  "description": "The one file all three services share. Every request to a worker uses the envelope; every answer uses the response shape. Edit shared/contract.schema.json, then run python scripts/sync_shared.py.",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_steps", "max_fetches", "max_tokens"],
+      "properties": {
+        "max_steps": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "max_fetches": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "max_tokens": { "type": "integer", "minimum": 1, "maximum": 5000000 }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "run_id", "time_budget_ms", "budget", "payload"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "run_id": { "$ref": "#/$defs/uuid" },
+        "time_budget_ms": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+        "budget": { "$ref": "#/$defs/budget" },
+        "payload": { "type": "object" }
+      }
+    },
+    "researchRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["topic", "k"],
+              "properties": {
+                "topic": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "k": { "type": "integer", "minimum": 1, "maximum": 10 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "requestClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "text", "source_url"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "source_url": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "verifyRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "properties": {
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["claims"],
+              "properties": {
+                "claims": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/requestClaim" } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps", "fetches", "tokens", "elapsed_ms"],
+      "properties": {
+        "steps": { "type": "integer", "minimum": 0 },
+        "fetches": { "type": "integer", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 },
+        "searches": { "type": "integer", "minimum": 0 },
+        "elapsed_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "message": { "type": "string", "maxLength": 600 },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "responseClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "text", "source_url"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "source_url": { "type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^https?://" }
+      }
+    },
+    "development": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "summary", "claims"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "claims": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/responseClaim" } }
+      }
+    },
+    "researchResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["developments"],
+      "properties": {
+        "developments": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/development" } }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "verdict", "evidence"],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "verdict": { "enum": ["supported", "unsupported", "unreachable"] },
+        "evidence": { "type": ["string", "null"], "maxLength": 300 }
+      },
+      "if": { "properties": { "verdict": { "const": "supported" } }, "required": ["verdict"] },
+      "then": { "properties": { "evidence": { "type": "string", "minLength": 1 } } },
+      "else": { "properties": { "evidence": { "type": "null" } } }
+    },
+    "verifyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdicts"],
+      "properties": {
+        "verdicts": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/verdict" } }
+      }
+    },
+    "okResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "run_id", "status", "usage", "result", "error"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "run_id": { "$ref": "#/$defs/uuid" },
+        "status": { "enum": ["complete", "partial"] },
+        "usage": { "$ref": "#/$defs/usage" },
+        "result": { "type": "object" },
+        "error": { "anyOf": [{ "$ref": "#/$defs/error" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "status": { "const": "complete" } }, "required": ["status"] },
+      "then": { "properties": { "error": { "type": "null" } } },
+      "else": { "properties": { "error": { "$ref": "#/$defs/error" } } }
+    },
+    "researchOk": {
+      "allOf": [
+        { "$ref": "#/$defs/okResponse" },
+        { "properties": { "result": { "$ref": "#/$defs/researchResult" } } }
+      ]
+    },
+    "verifyOk": {
+      "allOf": [
+        { "$ref": "#/$defs/okResponse" },
+        { "properties": { "result": { "$ref": "#/$defs/verifyResult" } } }
+      ]
+    },
+    "errorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "run_id", "status", "usage", "result", "error"],
+      "properties": {
+        "request_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "run_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "status": { "const": "failed" },
+        "usage": { "$ref": "#/$defs/usage" },
+        "result": { "type": "null" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "ok" } }
+    }
+  }
+}

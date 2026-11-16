@@ -1,0 +1,84 @@
+# CrowdCampaign orchestrator: the whole run's policy lives in this file (Assignment 2).
+# The orchestrator reads it; the two workers have their own config.yaml (services/researcher, services/verifier)
+# that says HOW they work. This file says WHAT a run is and HOW MUCH it may spend.
+# The code enforces every limit below; nothing a worker sends back can change them.
+
+# What the run is for, and how many developments to keep per campaign (1 <= k <= 10).
+topic: Market intel for CrowdCampaign briefs, so pitches build on what's new instead of repeating it
+k: 5
+
+# The campaigns to research. Each is matched to the app by its exact title, and each has its own research
+# topic (at most 300 characters). Results appear on that campaign's page in the app.
+campaigns:
+  - title: Get NYC students talking about zero-sugar lemonade
+    topic: zero-sugar and better-for-you soda and lemonade brands, their product launches and marketing aimed at Gen Z and college students
+  - title: Name and launch our oat-milk cold brew
+    topic: oat-milk and plant-based coffee drinks, cold brew launches, and coffee chain marketing campaigns
+  - title: Make our refillable bottle the one everyone carries
+    topic: reusable water bottle brands, viral bottle trends, product launches and marketing campaigns
+
+# Where the two workers are. The address and the secret token come from services/orchestrator/.env
+# (or the shell), never from this file. The two tokens are different on purpose.
+workers:
+  researcher:
+    url_env: RESEARCHER_URL
+    default_url: http://localhost:8001
+    token_env: RESEARCHER_TOKEN
+  verifier:
+    url_env: VERIFIER_URL                # for example https://crowdcampaign-verifier.onrender.com
+    default_url: http://localhost:8002
+    token_env: VERIFIER_TOKEN
+
+# ONE budget for the whole run. The orchestrator splits it between the two workers, hands each call a slice
+# (what is left in that worker's share, divided by the campaigns still to do), and adds up what the workers
+# report. A call that would go past the total is not made. A worker that never answers is charged its whole
+# slice. Each request is charged once, however many times it was retried.
+budget:
+  total:
+    steps: 80            # model calls (researcher) + claims checked (verifier)
+    fetches: 150         # every outbound web request: the page, each redirect, and robots.txt
+    tokens: 500000       # prompt + reply tokens across all model calls
+    seconds: 1800        # wall-clock time for the whole run, 30 minutes
+  researcher_share:      # the share of the total that goes to the researcher; the verifier gets the rest
+    steps: 0.5
+    fetches: 0.4
+    tokens: 0.75
+    seconds: 0.6
+  minimum_call:          # a call whose slice would be smaller than this is skipped, not made
+    researcher: {steps: 3, fetches: 2, tokens: 6000, seconds: 30}
+    verifier: {steps: 1, fetches: 2, tokens: 3000, seconds: 15}
+  reserve_seconds: 20    # kept back at the end for writing the report and saving the run
+
+claims:
+  max_per_campaign: 12   # at most this many claims per campaign go to the verifier (the rest show as "unverified")
+
+# Waiting for a worker. Our timeout for a call is the worker's own time budget plus read_margin, so we never
+# give up on a worker that is still inside its budget. Until a worker has answered once, cold_start_allowance
+# is added too (a free Render service takes about a minute to wake up).
+network:
+  connect_timeout_seconds: 15
+  read_margin_seconds: 15
+  cold_start_allowance_seconds: 90
+  warmup_timeout_seconds: 120        # how long the start-of-run wake-up (GET /healthz) may keep trying
+  retry_window_seconds: 120          # extra time one call may spend waiting and retrying
+  max_response_bytes: 2000000
+
+# Retries. Only transient failures are retried: connection refused or dropped, no answer in time, 502, 503, 504.
+# A retry sends the identical body with the same request_id and the full time budget. Never retried: 400, 401, 409, 500.
+retries:
+  max_attempts: 4                    # tries per call, the first included
+  base_delay_seconds: 2              # waits 2 s, 4 s, 8 s (plus a little randomness) ...
+  max_delay_seconds: 30              # ... never more than this
+  max_retry_after_seconds: 60        # a worker asking us to wait longer than this ends the call
+
+# Runs started from the website ("Research this campaign" in a campaign's Manage box) cover ONE campaign.
+# They get this share of the total budget above (the full run covers three campaigns, so about a third).
+# The website also limits how often it will start a run (see backend/.env.example).
+site:
+  budget_scale: 0.34
+
+# Talking to the CrowdCampaign app (where the run history and last run's top list live).
+app:
+  max_retries: 2
+  base_delay_seconds: 2
+  max_wait_seconds: 30

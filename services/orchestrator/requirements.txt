@@ -1,0 +1,4 @@
+# Install with: pip install -r requirements.txt   (from services/orchestrator/)
+requests>=2.31,<3      # HTTP to the two workers and to the CrowdCampaign API
+PyYAML>=6.0,<7         # reads config.yaml
+jsonschema>=4.18,<5    # checks every answer against the contract

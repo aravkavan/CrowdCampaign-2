@@ -8,8 +8,9 @@ dist/
 .env.local
 .env.*.local
 .secrets/
-# The tracker's API keys (model, search) live here
-tracker/.env
+# Each service's own keys and tokens (model, search, bearer tokens, app login) live in its .env.
+# The .env.example files next to them ARE committed; the real .env files are not.
+services/*/.env
 
 # Python
 .venv/
@@ -19,7 +20,7 @@ __pycache__/
 
 # NOTE: backend/.env and frontend/.env ARE committed on purpose (course requirement).
 # They hold only the throwaway database URL and non-secret settings.
-# tracker/.env is NOT committed: it holds personal API keys (see tracker/.env.example).
+# services/*/.env is NOT committed: it holds personal API keys and tokens (see services/*/.env.example).
 
 # System and editor clutter
 .DS_Store
@@ -27,3 +28,6 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# A log copied from Render (turn it into traces/verifier.jsonl with scripts/extract_trace.py, then delete it)
+render-log*.txt
