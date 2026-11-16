@@ -1,0 +1,35 @@
+# Render Blueprint: deploys the VERIFIER (Assignment 2) as a free web service.
+# Only the verifier is deployed. The researcher and the orchestrator run on your own computer.
+#
+# How to use it: push this project to GitHub, then in Render choose New > Blueprint, pick the repo, and
+# type in the three secret values when it asks. RUNBOOK.md has the steps.
+#
+# Everything in services/verifier/ is all this service can see: Render hides files outside rootDir, which is
+# why the shared code is copied into services/verifier/verifier/ (python scripts/sync_shared.py does that).
+
+services:
+  - type: web
+    name: crowdcampaign-verifier
+    runtime: python
+    plan: free                     # sleeps after 15 minutes without a request; the first request after that takes about a minute
+    region: oregon                 # pick the region closest to you (it cannot be changed later)
+    rootDir: services/verifier     # the build and start commands below run inside this folder
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m verifier   # listens on $PORT, which Render sets
+    healthCheckPath: /healthz      # answers {"status":"ok"} without a token
+    autoDeployTrigger: commit      # redeploys when something under services/verifier changes
+    envVars:
+      # The version this project was tested with. Render's default for new services is newer (3.14), which was not tried.
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      # The three values below are SECRETS. They are typed into Render's dashboard once, never written in this file.
+      # The token must be the same as VERIFIER_TOKEN in services/orchestrator/.env.
+      - key: VERIFIER_TOKEN
+        sync: false
+      # One model key is enough. Give the verifier a different model from the researcher's if you can: a second
+      # opinion from the same model makes the same mistakes. If you only have one key, leave the other box empty
+      # (or delete its two lines here before deploying).
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
