@@ -162,6 +162,18 @@ def fetch_policy(raw: dict) -> FetchPolicy:
     )
 
 
+def env_key(name: str | None) -> str:
+    """An API key from the environment, or "" when it is missing or only a placeholder.
+    Some hosting forms will not take an empty value, so people type "-" or "none": those count as not set,
+    and so does anything too short to be a real key."""
+    if not name:
+        return ""
+    value = os.environ.get(name, "").strip().strip('"').strip("'")
+    if value.lower() in {"-", "--", "none", "null", "empty", "x", "n/a", "na", "todo", "changeme"} or len(value) < 8:
+        return ""
+    return value
+
+
 def resolve_model(sec: dict) -> ModelSettings:
     """Choose the provider: the one named in config.yaml, or with "auto" the first whose key is set."""
     providers = sec.get("providers") or {}
@@ -176,7 +188,7 @@ def resolve_model(sec: dict) -> ModelSettings:
         if not base_url:
             raise ConfigError(f"Provider '{name}' needs a base_url in config.yaml.")
         key_env = entry.get("key_env", known.get("key_env"))
-        api_key = os.environ.get(key_env, "").strip() if key_env else None
+        api_key = env_key(key_env) if key_env else None
         if key_env and not api_key:
             raise ConfigError(f"{key_env} is not set. Add it to this service's .env file (see .env.example).")
         if not entry.get("name"):
@@ -204,7 +216,7 @@ def resolve_model(sec: dict) -> ModelSettings:
         return settings(wanted)
     for name, entry in providers.items():
         key_env = (entry or {}).get("key_env", PROVIDERS.get(name, {}).get("key_env"))
-        if key_env and os.environ.get(key_env, "").strip():
+        if key_env and env_key(key_env):
             return settings(name)
     needed = [((e or {}).get("key_env") or PROVIDERS.get(n, {}).get("key_env")) for n, e in providers.items()]
     needed = [n for n in needed if n]

@@ -432,7 +432,10 @@ class SelfTest:
         claims = [{"claim_id": f"u{i}", "text": f"The page at address number {i} says something.", "source_url": url}
                   for i, url in enumerate(BLOCKED_URLS, 1)]
         request_id = str(uuid.uuid4())
-        reply = self.probe.post(canonical(self.envelope({"claims": claims}, request_id=request_id)))
+        envelope = self.envelope({"claims": claims}, request_id=request_id)
+        # Each blocked claim costs one step, so give at least one step per address (no fetch is ever made for them).
+        envelope["budget"]["max_steps"] = max(envelope["budget"]["max_steps"], len(BLOCKED_URLS) + 2)
+        reply = self.probe.post(canonical(envelope))
         if reply.status != 200:
             error = reply.error or {}
             return Result(6, name, "fail", f"HTTP {reply.status or reply.problem} {error.get('code', '')} {str(error.get('message', ''))[:120]}".strip())
