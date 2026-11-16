@@ -319,7 +319,7 @@ The orchestrator owns all state between runs. It lives in the app's PostgreSQL d
 Every service writes one JSON object per line for every request it receives (`direction: "in"`) and every call it makes (`direction: "out"`), with these fields: `ts, service, run_id, request_id, step, direction, endpoint_or_tool, status, latency_ms, attempt, tokens` (a few lines add a `detail` field). **Latency is measured on the caller's side**, because the machines' clocks disagree. Using `run_id` and `request_id` you can follow one request through all three logs:
 
 ```bash
-grep -h "<request_id>" traces/*.jsonl
+python3 scripts/find_trace.py <request_id>   # Windows: py scripts/find_trace.py <request_id>
 ```
 
 | Log | Written by |

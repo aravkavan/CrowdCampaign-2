@@ -8,7 +8,7 @@ Course: CSCI-GA.2630, Fall 2026, assignment "Agentic Orchestration".
 - Code quotes are copied from the file named above them.
 - Numbers for the **old single-agent tracker (A2)** are real. They come from `reports/run1.md`, `reports/run2.md`, `traces/run1.jsonl` and `traces/run2.jsonl`.
 - Numbers for the **new team** come from live runs (real model keys, real search, the verifier on Render). Each one is marked **FILL&nbsp;IN**, with the command that produces it.
-- Before submitting, this command must print nothing (the brackets keep it from matching this very line): `grep -n "FILL[ ]IN" ORCHESTRATION.md` (Windows: `findstr /n /r "FILL[ ]IN" ORCHESTRATION.md`).
+- Before submitting, this must say `No blanks left.`: `python3 scripts/find_blanks.py` (Windows: `py scripts/find_blanks.py`).
 
 ---
 
@@ -147,21 +147,50 @@ For three campaigns, a run makes at least 8 calls from the orchestrator to the w
 The orchestrator also makes 4 calls to the CrowdCampaign app: login, list campaigns, load state, save the run.
 The workers' own calls (model, search, web pages, robots.txt) are in their own logs.
 
-> **FILL IN (run 1): every cross-service call and its latency.**
-> Run `python -m orchestrator stats ../../traces/orchestrator.jsonl ../../traces/researcher.jsonl ../../traces/verifier.jsonl` from `services/orchestrator/`
-> (`--run <start of the run id>` picks a run; the default is the latest). Paste the whole output here:
->
-> ```
-> (paste here)
-> ```
->
-> The first block of that output ("Calls from the orchestrator to the workers") is the list asked for. The latency on each line is measured by the orchestrator, the caller.
+Run 1 (`python -m orchestrator stats ../../traces/orchestrator.jsonl ../../traces/researcher.jsonl ../../traces/verifier.jsonl --run d388800e`):
+
+```
+Trace summary for run d388800e-19ac-48f0-80e8-67a405880e63
+  76 log lines from orchestrator.jsonl, researcher.jsonl, verifier.jsonl
+  Wall-clock time: 88.8 s
+
+Calls from the orchestrator to the workers (latency measured by the orchestrator):
+  11:35:56.433  verifier GET /healthz      try 1  HTTP 200      0.2 s   request -  awake
+  11:35:58.317  researcher GET /healthz    try 1  HTTP 200      2.1 s   request -  awake
+  11:36:21.933  researcher POST /research  try 1  HTTP 200     23.6 s   request 36ca2edb  complete
+  11:36:24.395  verifier POST /verify      try 1  HTTP 200      2.5 s   request 5fb5b872  complete
+  11:36:44.946  researcher POST /research  try 1  HTTP 200     20.5 s   request 870191c3  complete
+  11:36:49.583  verifier POST /verify      try 1  HTTP 200      4.6 s   request bfa1c58c  complete
+  11:37:13.295  researcher POST /research  try 1  HTTP 200     23.7 s   request a636390d  complete
+  11:37:20.406  verifier POST /verify      try 1  HTTP 200      7.1 s   request 9ea5312b  complete
+
+Where the time went (every outbound call, by service and kind; calls overlap, so this can exceed wall-clock):
+  orchestrator  researcher        4 calls      70.0 s
+  orchestrator  verifier          4 calls      14.4 s
+  orchestrator  app               4 calls       2.4 s
+  orchestrator  check             6 calls       0.0 s
+  researcher    search_web        9 calls      39.7 s
+  researcher    model            21 calls      20.3 s   tokens 76,931
+  researcher    fetch_article    10 calls       3.9 s
+  researcher    robots            7 calls       0.8 s
+  verifier      fetch_article     2 calls       3.2 s
+  verifier      model             4 calls       2.6 s   tokens 5,716
+  verifier      robots            1 calls       0.3 s
+
+Requests each service answered:
+  researcher      3 requests, 65.8 s in total
+  verifier        1 requests, 7.0 s in total
+```
+
+The first block is every call between services: 8 calls, all answered on the first try with HTTP 200. The latency on each line is measured by the orchestrator, the caller.
+
+Note: `verifier.jsonl` only holds the verifier's lines for the last of its three `/verify` requests (the Render log I copied did not reach back to the first two), so the verifier's lines above under-count. The cost table in question 5 uses the usage each worker reported for every call, from `reports/orch-run3.md`.
 
 ### Where the time went
 
-> **FILL IN (run 1): from the "Where the time went" block above, in two or three sentences.**
-> Which service took the most time? Inside it, was it model calls, search or page downloads?
-> Compare with the A2 tracker (next table): the researcher is the same code, so its share should look familiar.
+In run 1 the researcher took most of the time: 70.0 s of the 88.8 s run was spent waiting on its three `/research` calls, against 14.4 s for the verifier.
+Inside the researcher, search was the biggest part (39.7 s, 9 calls), then model calls (20.3 s, 21 calls); page downloads were small (4.7 s with robots.txt).
+That matches the A2 tracker below, where model and search calls also dominated.
 
 The A2 tracker's own numbers for the same three campaigns, from `python -m orchestrator stats ../../traces/run1.jsonl` and `run2.jsonl`:
 
@@ -182,10 +211,7 @@ Render's free tier spins a service down after 15 minutes without a request. The 
 The orchestrator sends `GET /healthz` to both workers at the very start of the run, in a background thread, and times it.
 The verifier is not needed until the first campaign's research is done, so the wake-up overlaps the research.
 
-> **FILL IN (run 1):**
-> The verifier took ___ s to wake (the line `Wake-up of the verifier: answered after N tries in X s` in `reports/orch-run1.md`, and the `verifier GET /healthz` lines in the orchestrator trace).
-> The first research call took ___ s, so the wake-up cost the run ___ s of waiting (zero if the research took longer than the wake-up).
-> To see a real cold start, let the service sit idle for 20 minutes before run 1.
+In run 1 the verifier was already awake: its `GET /healthz` answered on the first try in 0.2 s. The first research call took 23.6 s, so the wake-up cost the run 0 s of waiting. This run did not show a cold start.
 
 ### How the timeouts were chosen
 
@@ -213,7 +239,7 @@ read_timeout = budget_s + self.network.read_margin + (0 if self.warm else self.n
 deadline = received + budget_ms / 1000 - min(0.25, 0.1 * budget_ms / 1000)
 ```
 
-> **FILL IN (after your runs): did a timeout ever fire?** One sentence. If `Wake-up of the verifier` took longer than expected, say what you changed.
+No timeout fired in run 1: every call between services was answered on its first try with HTTP 200, the slowest in 23.7 s, far inside its budget.
 
 ---
 
@@ -398,38 +424,40 @@ The excerpt must appear in the fetched page text. Both strings are normalised th
 
 ### Cost and latency per run
 
-> **FILL IN (runs 1 and 2 of the new team):** run `python -m orchestrator stats ../../traces/orchestrator.jsonl ../../traces/researcher.jsonl ../../traces/verifier.jsonl` for the time and token lines,
-> and read the footer of `reports/orch-run1.md` and `orch-run2.md` ("Run stats", "Claims").
+Team run 1 is `reports/orch-run3.md` (run `d388800e`), team run 2 is `reports/orch-run4.md` (run `bd2f20e3`); the report numbers count every saved run, and two earlier runs came first.
+Tokens, steps and downloads are the usage each worker reported for each call (the report's "Worker calls" list), added up.
 
 | | A2 run 1 | A2 run 2 | Team run 1 | Team run 2 |
 |---|---|---|---|---|
-| Run time printed in the report | 1 min 41 s | 2 min 3 s | **FILL IN** | **FILL IN** |
-| First to last trace line | 110.7 s | 125.0 s | **FILL IN** | **FILL IN** |
-| Model calls (steps) | 24 | 22 | **FILL IN** | **FILL IN** |
-| Tokens (prompt + reply) | 89,500 | 90,093 | **FILL IN** | **FILL IN** |
-| &nbsp;&nbsp;of which researcher / verifier | all | all | **FILL IN** / **FILL IN** | **FILL IN** / **FILL IN** |
-| Search credits | 8 | 8 | **FILL IN** | **FILL IN** |
-| Page downloads (fetches, incl. robots.txt) | 18 | 18 | **FILL IN** | **FILL IN** |
-| Calls between services | 0 | 0 | **FILL IN** | **FILL IN** |
-| Retries of calls between services | not applicable | not applicable | **FILL IN** | **FILL IN** |
+| Run time printed in the report | 1 min 41 s | 2 min 3 s | 1 min 24 s | 1 min 14 s |
+| First to last trace line | 110.7 s | 125.0 s | 88.8 s | 78.2 s |
+| Model calls (steps) | 24 | 22 | 31 (21 + 10) | 37 (21 + 16) |
+| Tokens (prompt + reply) | 89,500 | 90,093 | 91,521 | 83,340 |
+| &nbsp;&nbsp;of which researcher / verifier | all | all | 76,931 / 14,590 | 69,485 / 13,855 |
+| Search credits | 8 | 8 | 9 | 8 |
+| Page downloads (fetches, incl. robots.txt) | 18 | 18 | 27 (17 + 10) | 22 (12 + 10) |
+| Calls between services | 0 | 0 | 8 (6 jobs + 2 health checks) | 8 (6 jobs + 2 health checks) |
+| Retries of calls between services | not applicable | not applicable | 0 | 0 |
 
 A2 downloads: 10 page trips + 8 robots.txt lookups in each run. The "fetches" in the team's budget count the same things.
 
 **What the design allows at most.** `config.yaml` gives the researcher 50% of the run's steps, 40% of the downloads, 75% of the tokens and 60% of the time. The verifier gets the rest: **40 steps, 90 fetches, 125,000 tokens, 720 s** for the whole run. At most 12 claims per campaign are sent, so at most 36 per run. This is a ceiling the code enforces, not a measurement.
 
-> **FILL IN:** the extra cost and time per run, in one sentence: team minus A2, in tokens and in minutes.
+The verifier itself added about 14,000 tokens (14,590 and 13,855) and about 15 s of waiting (14.2 s and 14.8 s of `/verify` calls) per run; overall the team used about the same tokens as A2 (91,521 and 83,340 against 89,500 and 90,093) and finished sooner (1 min 24 s and 1 min 14 s against 1 min 41 s and 2 min 3 s), because the researcher's own share happened to be smaller in these runs.
 
 ### What the verifier decided
 
-> **FILL IN (run 1 and run 2):** from `reports/orch-run1.md`, line "Claims: N in all: ...".
+From the line "Claims: N in all: ..." of `reports/orch-run3.md` (team run 1) and `reports/orch-run4.md` (team run 2).
 
 | | Run 1 | Run 2 |
 |---|---|---|
-| Claims in all | **FILL IN** | **FILL IN** |
-| Supported | **FILL IN** | **FILL IN** |
-| Unsupported | **FILL IN** | **FILL IN** |
-| Unreachable | **FILL IN** | **FILL IN** |
-| Unverified (never sent: over the cap of 12 per campaign, or the verifier failed) | **FILL IN** | **FILL IN** |
+| Claims in all | 10 | 16 |
+| Supported | 5 | 9 |
+| Unsupported | 5 | 1 |
+| Unreachable | 0 | 6 |
+| Unverified (never sent: over the cap of 12 per campaign, or the verifier failed) | 0 | 0 |
+
+All 6 unreachable claims in run 2 cite the same bevnet.com page, which the verifier could not read.
 
 "Unreachable" covers every case where the verifier ended up without a readable page: the guard refused the address, `robots.txt` said no, a blocked site (social networks, paywalled news), a download that failed, or a page with almost no readable text (it may need JavaScript or a login).
 The researcher already throws away claims whose numbers are not in the page it read, so the interesting "unsupported" verdicts are claims that go beyond the page's words, pages that changed between the two reads, and a strict model.
@@ -445,24 +473,25 @@ Open each page and look for the words of the claim.
 - An **unsupported** verdict is **wrong** if the page does say the claim (a good claim was thrown away).
 - A **supported** verdict is **wrong** if the excerpt is not on the page, or does not state the claim with every number and name (false confidence, the worse mistake).
 
-> **FILL IN (after ticking the sheet):**
->
-> | | Checked | Verifier right | Verifier wrong | Could not tell |
-> |---|---|---|---|---|
-> | Unsupported (all of them) | | | | |
-> | Supported (10 at random) | | | | |
->
-> Which sheet this is from (run number and seed): ___
+From `reports/handcheck-run4.md` (team run 2), ticked by hand on Nov 16:
+
+| | Checked | Verifier right | Verifier wrong | Could not tell |
+|---|---|---|---|---|
+| Unsupported (all of them) | 1 | 1 | 0 | 0 |
+| Supported (all 9; there were fewer than 10) | 9 | 8 | 0 | 1 |
+
+The one "could not tell" (B2) is a partial match: the excerpt is on the page and gives the date "Nov. 4" but not the year 2026 that the claim adds.
+All 6 unreachable claims cite one bevnet.com page that opens fine in a browser, so the verifier was refused or got no readable text, not a dead link.
+
+Which sheet this is from (run number and seed): run 4, seed `8524066e-d6d9-4979-839e-5786fffa9824`.
 
 ### My answer
 
-> **FILL IN: three or four sentences, using only the numbers above.** Questions to answer:
-> - What did the second agent cost, in tokens and minutes, compared with the A2 tracker?
-> - Did it catch anything real? Count the unsupported verdicts that were right.
-> - How often was it wrong in each direction? A "supported" that is wrong is worse than an "unsupported" that is wrong.
-> - Was that worth the extra cost, the second service to keep alive, and the cold start?
->
-> The yardstick: the A2 tracker already checked that each quote and each number is in the page it read, so the verifier is a **second, independent** reading by a different fetch (and, with two keys, a different model). It earns its place only if that second reading finds mistakes the first missed, and rarely approves something false.
+The second agent cost about 14,000 extra tokens (14,590 and 13,855) and about 15 s of verify calls per run, roughly 16% of each team run's tokens, yet both team runs still finished sooner than the A2 tracker and used about the same total tokens.
+It caught something real: the one unsupported verdict I checked was right (the page does not say the launch was in October 2026), and run 1 flagged 5 of 10 claims as going beyond their pages.
+In the other direction it made no false approvals: 8 of the 9 supported claims were fully right and 1 was only partly (the year was not in the excerpt), and none was wrong.
+Its weak spot is coverage: 6 of 16 claims in run 2 came back unreachable from a page that opens in a browser, so those claims were simply not checked.
+For this small cost and no false "supported" in the sample, I think it was worth it, though 10 hand-checked claims is a small sample and the free Render service needs a wake-up (33.3 s in the self-test) that the early health check has to hide.
 
 ---
 
@@ -475,17 +504,17 @@ python scripts/selftest.py --all
 python scripts/selftest.py --worker verifier --url https://<your-service>.onrender.com --token "$VERIFIER_TOKEN"
 ```
 
-The same seven checks run automatically against the real workers in `tests/test_end_to_end.py` (with a fake model, fake search and fake web pages, so they cost nothing). The table below is for the **live** workers.
+The same seven checks run automatically against the real workers in `tests/test_end_to_end.py` (with a fake model, fake search and fake web pages, so they cost nothing). The table below is for the **live** workers: the researcher on this computer and the verifier on Render (`py scripts/selftest.py --all`, Nov 16; the verifier woke from sleep in 33.3 s).
 
 | # | Send | Expected | Researcher | Verifier |
 |---|---|---|---|---|
-| 1 | No token / wrong token | 401 | **FILL IN** | **FILL IN** |
-| 2 | A body that fails the schema | 400 | **FILL IN** | **FILL IN** |
-| 3 | Same `request_id` and body twice | same response; no new model calls or fetches the second time | **FILL IN** | **FILL IN** |
-| 4 | Same `request_id`, different body | 409 | **FILL IN** | **FILL IN** |
-| 5 | Same `request_id` while the first is running | 503 with `Retry-After` | **FILL IN** | **FILL IN** |
-| 6 | Claim URL `http://169.254.169.254/` or `http://localhost/` | `unreachable`, no fetch attempted | not applicable | **FILL IN** |
-| 7 | A tiny `time_budget_ms` | `partial`, with what it had | **FILL IN** | **FILL IN** |
+| 1 | No token / wrong token | 401 | PASS: 6 bad-token requests got 401, token checked before the body | PASS (on Render): same |
+| 2 | A body that fails the schema | 400 | PASS: 7 broken bodies each got 400 and the error object | PASS (on Render): same |
+| 3 | Same `request_id` and body twice | same response; no new model calls or fetches the second time | PASS: stored answer, byte-for-byte identical; log shows one `replayed` line and no new model, search or fetch calls | PASS (on Render): stored answer, byte-for-byte identical; log not readable from here |
+| 4 | Same `request_id`, different body | 409 | PASS: 409 (retryable: false) | PASS (on Render): 409 (retryable: false) |
+| 5 | Same `request_id` while the first is running | 503 with `Retry-After` | PASS: 503 with Retry-After: 30; the first copy finished with 200 | PASS (on Render): same |
+| 6 | Claim URL `http://169.254.169.254/` or `http://localhost/` | `unreachable`, no fetch attempted | not applicable | PASS (on Render): all 8 blocked addresses `unreachable`, no evidence, `usage.fetches` = 0 |
+| 7 | A tiny `time_budget_ms` | `partial`, with what it had | PASS: `time_budget_ms=1` gave `partial` (time_budget_exhausted) in 0.0 s | PASS (on Render): `partial` in 0.1 s |
 
 ---
 

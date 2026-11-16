@@ -175,12 +175,12 @@ This keeps only the trace lines and writes `traces/verifier.jsonl`. Now all thre
 To follow one request through all three, copy a `request_id` from the orchestrator log and search for it:
 
 ```
-grep -h "<request_id>" traces/*.jsonl        (Windows: findstr /s "<request_id>" traces\*.jsonl)
+python3 scripts/find_trace.py <request_id>     (Windows: py scripts/find_trace.py <request_id>)
 ```
 
 ## 7. Fill in `ORCHESTRATION.md`
 
-Find every blank: `grep -n "FILL[ ]IN" ORCHESTRATION.md` (Windows: `findstr /n /r "FILL[ ]IN" ORCHESTRATION.md`).
+Find every blank: `python3 scripts/find_blanks.py` (Windows: `py scripts/find_blanks.py`).
 
 | Blank | Command (from `services/orchestrator`) |
 |---|---|
@@ -209,7 +209,7 @@ This part is real work and cannot be skipped: nobody can do it for you, because 
 
 ## 9. Before you hand it in
 
-- [ ] `grep -n "FILL[ ]IN" ORCHESTRATION.md` prints nothing.
+- [ ] `python3 scripts/find_blanks.py` says `No blanks left.`
 - [ ] `python3 scripts/sync_shared.py --check` says all copies match.
 - [ ] Tests pass: in each of `services/researcher`, `services/verifier`, `services/orchestrator` run `python3 -m unittest discover -s tests`; in the project folder run `python3 -m unittest discover -s tests`.
 - [ ] `git status` shows no `.env` file under `services/` and no key anywhere.
